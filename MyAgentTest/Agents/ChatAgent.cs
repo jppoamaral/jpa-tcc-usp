@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Configuration;
@@ -7,24 +8,36 @@ using OpenAI.Chat;
 public class ChatAgent : IAgent
 {
     public string Name => "AzureChatAgent";
+    public ChatClient _client;
+    public List<ChatMessage> messagesList = new List<ChatMessage>();
+    private List<string> _settings;
+    ChatTool callAssistantTool = ChatTool.CreateFunctionTool(
+        functionName: nameof(CallAssistantAgent),
+        functionDescription: "Get the user's travel history",
+        functionParameters: BinaryData.FromString("""
+        {
+            "type": "object",
+            "properties": {
+                "country": {
+                    "type": "string",
+                    "description": "The country name, e.g. Portugal"
+                }
+                
+            }
+        }
+        """)
+    );
 
-    private readonly string _endpoint;
-    private readonly string _key;
-    private readonly string _deployment;
-
-    public ChatAgent(IConfiguration config)
+    public ChatAgent(List<string> settings)
     {
-        _endpoint = config["AzureOAIEndpoint"]!;
-        _key = config["AzureOAIKey"]!;
-        _deployment = config["AzureOAIDeploymentName"]!;
-
-        AzureOpenAIClient azureClient = new AzureOpenAIClient(new Uri(_endpoint), new AzureKeyCredential(_key));    
-        ChatClient _client = azureClient.GetChatClient(_deployment);
+        AzureOpenAIClient azureClient = new AzureOpenAIClient(new Uri(settings[0]), new AzureKeyCredential(settings[1]));
+        _client = azureClient.GetChatClient(settings[2]);
+        _settings = settings;
     }
-    public async Task RunAsync(CancellationToken token)
+    public async Task RunAsync()
     {
         //Initialize messages list
-        var messagesList = new List<ChatMessage>();
+        // var messagesList = new List<ChatMessage>();
 
         do
         {
@@ -51,39 +64,96 @@ public class ChatAgent : IAgent
             }
             else
             {
-                // Format and send the request to the model
                 messagesList.Add(new SystemChatMessage(systemMessage));
                 messagesList.Add(new UserChatMessage(userMessage));
-                GetResponseFromOpenAI(messagesList);
-                //GetResponseFromOpenAI(systemMessage, userMessage);
+
+                Console.WriteLine("\nSending prompt to Azure OpenAI endpoint...\n\n");
+                ChatCompletionOptions chatCompletionOptions = new ChatCompletionOptions()
+                {
+                    Temperature = 0.7f,
+                    MaxOutputTokenCount = 800,
+                    Tools = { callAssistantTool }
+                };
+
+                ChatCompletion completion = await _client.CompleteChatAsync(
+                    messagesList,
+                    chatCompletionOptions
+                );
+
+                if (completion.FinishReason == ChatFinishReason.ToolCalls)
+                {
+                    messagesList.Add(new AssistantChatMessage(completion));
+                    Console.WriteLine("Tool call detected, processing...");
+                    foreach (ChatToolCall toolCall in completion.ToolCalls)
+                    {
+                        Console.WriteLine($"Tool call detected: {toolCall.FunctionArguments}");
+                        var toolResponse = GetToolCallContent(toolCall, chatCompletionOptions);
+                        messagesList.Add(new ToolChatMessage(toolCall.Id, toolResponse.Content));
+                    }
+                }
+                else if (completion.FinishReason == ChatFinishReason.Stop)
+                {
+                    Console.WriteLine("Chat completed without tool calls.");
+                }
+                else
+                {
+                    Console.WriteLine($"Chat finished with reason: {completion.FinishReason}");
+                }
+                completion = await _client.CompleteChatAsync(
+                    messagesList,
+                    chatCompletionOptions
+                );
+                Console.WriteLine($"{completion.Role}: {completion.Content[0].Text}");
+                // if (completion.Content[0].Text.Contains("Agent"))
+                // {
+                //     AssistantAgent assistant = new AssistantAgent(_settings);
+                //     var assistantReply = assistant.CallAssistant(completion.Content[0].Text);
+                //     messagesList.Add(new UserChatMessage(assistantReply));
+                //     completion = await _client.CompleteChatAsync(messagesList, chatCompletionOptions);
+                //     Console.WriteLine($"{completion.Role}: {completion.Content[0].Text}");
+                // }
             }
         } while (true);
 
     }
-
-    // Define the function that gets the response from Azure OpenAI endpoint
-    private static void GetResponseFromOpenAI(List<ChatMessage> messagesList)
+    private string CallAssistantAgent(ChatToolCall toolCall, ChatCompletionOptions options, string country)
     {
-        Console.WriteLine("\nSending prompt to Azure OpenAI endpoint...\n\n");
-
-        // // Configure the Azure OpenAI client
-        // AzureOpenAIClient azureClient = new(new Uri(oaiEndpoint),
-        //     new AzureKeyCredential(oaiKey));
-        // ChatClient chatClient = azureClient.GetChatClient(oaiDeploymentName);
-
-        // Get response from Azure OpenAI
-        ChatCompletionOptions chatCompletionOptions = new ChatCompletionOptions()
-        {
-            Temperature = 0.7f,
-            MaxOutputTokenCount = 800
-        };
-
-        // ChatCompletion completion = chatClient.CompleteChat(
-        //     messagesList,
-        //     chatCompletionOptions
-        // );
-
+        Console.WriteLine("dentro da chamada do assistente");
+        Console.WriteLine($"Calling assistant with completion: {toolCall}");
+        AssistantAgent assistant = new AssistantAgent(_settings);
+        var assistantReply = assistant.CallAssistant(country);
+        // messagesList.Add(new AssistantChatMessage(assistantReply));
+        // var completion = _client.CompleteChat(messagesList, options);
         // Console.WriteLine($"{completion.Role}: {completion.Content[0].Text}");
-        // messagesList.Add(new AssistantChatMessage(completion.Content[0].Text));
+        return assistantReply;
     }
+
+    public ToolChatMessage GetToolCallContent(ChatToolCall toolCall, ChatCompletionOptions options)
+    {
+        Console.WriteLine("Processing tool call content...");
+        if (toolCall.FunctionName == callAssistantTool.FunctionName)
+        {
+            // Validate arguments before using them; it's not always guaranteed to be valid JSON!
+            try
+            {
+                using JsonDocument argumentsDocument = JsonDocument.Parse(toolCall.FunctionArguments);
+                argumentsDocument.RootElement.TryGetProperty("country", out JsonElement countryElement);
+                //argumentsDocument.RootElement.TryGetProperty("number", out JsonElement numberElement);
+
+                string country = countryElement.GetString() ?? string.Empty;
+                //string? number = numberElement.GetString();
+                if (!string.IsNullOrEmpty(country))
+                {
+                    var assistantResponse = CallAssistantAgent(toolCall, options, country);
+                    return new ToolChatMessage(toolCall.Id, assistantResponse);
+                }
+            }
+            catch (JsonException)
+            {
+                // Handle the JsonException (bad arguments) here
+            }
+        }
+        // Handle unexpected tool calls
+        throw new NotImplementedException();
+}   
 }

@@ -9,65 +9,34 @@ using Azure;
 // Add Azure OpenAI packages
 using Azure.AI.OpenAI;
 using OpenAI.Chat;
+using System.Threading.Tasks;
 
 // Build a config object and retrieve user settings.
 class ChatMessageLab
 {
+    static string? oaiEndpoint;
+    static string? oaiKey;
+    static string? oaiDeploymentName;
+    static async Task Main(string[] args)
+    {
+        IConfiguration config = new ConfigurationBuilder()
+        .SetBasePath(Directory.GetCurrentDirectory())
+        .AddJsonFile("appsettings.json", optional: true)
+        .AddJsonFile("appsettings.Development.json", optional: true)
+        .Build();
 
-static string? oaiEndpoint;
-static string? oaiKey;
-static string? oaiDeploymentName;
-static void Main(string[] args)
-{
-    IConfiguration config = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: true)
-    .AddJsonFile("appsettings.Development.json", optional: true)
-    
-    .Build();
+        oaiEndpoint = config["AzureOAIEndpoint"];
+        // oaiKey = config["AzureOAIKey"];
+        oaiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_KEY");
+        oaiDeploymentName = config["AzureOAIDeploymentName"];
+        List<string> settings = new List<string>();
+        settings.Add(oaiEndpoint ?? "");
+        settings.Add(oaiKey ?? "");
+        settings.Add(oaiDeploymentName ?? "");
 
-    oaiEndpoint = config["AzureOAIEndpoint"];
-    // oaiKey = config["AzureOAIKey"];
-    //oaiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_KEY");
-    oaiDeploymentName = config["AzureOAIDeploymentName"];
-
-    //Initialize messages list
-    var messagesList = new List<ChatMessage>();
-
-    do
-        {
-            // Pause for system message update
-            Console.WriteLine("-----------\nPausing the app to allow you to change the system prompt.\nPress any key to continue...");
-            Console.ReadKey();
-
-            Console.WriteLine("\nUsing system message from system.txt");
-            string systemMessage = System.IO.File.ReadAllText("system.txt");
-            systemMessage = systemMessage.Trim();
-
-            Console.WriteLine("\nEnter user message or type 'quit' to exit:");
-            string userMessage = Console.ReadLine() ?? "";
-            userMessage = userMessage.Trim();
-
-            if (systemMessage.ToLower() == "quit" || userMessage.ToLower() == "quit")
-            {
-                break;
-            }
-            else if (string.IsNullOrEmpty(systemMessage) || string.IsNullOrEmpty(userMessage))
-            {
-                Console.WriteLine("Please enter a system and user message.");
-                continue;
-            }
-            else
-            {
-                // Format and send the request to the model
-                messagesList.Add(new SystemChatMessage(systemMessage));
-                messagesList.Add(new UserChatMessage(userMessage));
-                GetResponseFromOpenAI(messagesList);
-                //GetResponseFromOpenAI(systemMessage, userMessage);
-            }
-        } while (true);
-
-}
+        ChatAgent agent = new ChatAgent(settings);
+        await agent.RunAsync();
+    }
 
     // Define the function that gets the response from Azure OpenAI endpoint
     private static void GetResponseFromOpenAI(List<ChatMessage> messagesList)
