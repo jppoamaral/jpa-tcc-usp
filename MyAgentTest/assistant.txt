@@ -9,9 +9,9 @@ The request you can get looks like this: Agent Portugal
 
 The request you can get looks like this: Agent five
 
-The request you can get looks like this: Agent coutries
+The request you can get looks like this: Agent countries
 
 
 If revieve the name of country not visited, you return no
 If you recieve a number, you will reply if its the correct number of coutries traveled to or not.
-If recieve just the word countries, you return a list of the coutries.
+If recieve just the word 'countries', you return a list of the countries.

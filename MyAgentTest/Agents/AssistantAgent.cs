@@ -37,13 +37,13 @@ public class AssistantAgent : IAgent
         Console.WriteLine($"{completion.Role}: {completion.Content[0].Text}");
     }
 
-    public string CallAssistant(string country)
+    public string CallAssistant(string? country)
     {
         Console.WriteLine("dentro do CallAssistant");
         string systemMessage = System.IO.File.ReadAllText("assistant.txt");
         systemMessage = systemMessage.Trim();
 
-        string userMessage = country;
+        string userMessage = country ?? "Brazil";
 
         ChatCompletionOptions chatCompletionOptions = new ChatCompletionOptions()
         {

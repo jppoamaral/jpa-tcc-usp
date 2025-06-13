@@ -20,9 +20,8 @@ public class ChatAgent : IAgent
             "properties": {
                 "country": {
                     "type": "string",
-                    "description": "The country name, e.g. Portugal"
+                    "description": "The country name, e.g. Portugal. This can have the value 'country' if the user does not know which country they have visited. This can also be a list of countries, e.g. Portugal, Spain, and France. This can also be the number of coutries the user has visited, e.g. five. This is a number in words, not digits. This can have the value 'number' if the user does not know how many countries they have visited."
                 }
-                
             }
         }
         """)
@@ -116,7 +115,7 @@ public class ChatAgent : IAgent
         } while (true);
 
     }
-    private string CallAssistantAgent(ChatToolCall toolCall, ChatCompletionOptions options, string country)
+    private string CallAssistantAgent(ChatToolCall toolCall, ChatCompletionOptions options, string? country)
     {
         Console.WriteLine("dentro da chamada do assistente");
         Console.WriteLine($"Calling assistant with completion: {toolCall}");
@@ -137,11 +136,13 @@ public class ChatAgent : IAgent
             try
             {
                 using JsonDocument argumentsDocument = JsonDocument.Parse(toolCall.FunctionArguments);
-                argumentsDocument.RootElement.TryGetProperty("country", out JsonElement countryElement);
-                //argumentsDocument.RootElement.TryGetProperty("number", out JsonElement numberElement);
+                JsonElement countryElement = default;
+                // JsonElement numberElement = default;
+                argumentsDocument.RootElement.TryGetProperty("country", out countryElement);
+                // argumentsDocument.RootElement.TryGetProperty("number", out numberElement);
 
-                string country = countryElement.GetString() ?? string.Empty;
-                //string? number = numberElement.GetString();
+                string? country = countryElement.GetString() ?? string.Empty;
+                // string? number = numberElement.GetString() ?? string.Empty;
                 if (!string.IsNullOrEmpty(country))
                 {
                     var assistantResponse = CallAssistantAgent(toolCall, options, country);
